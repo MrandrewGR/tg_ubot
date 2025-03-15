@@ -3,6 +3,8 @@
 import asyncio
 import signal
 import logging
+import os
+import base64
 from telethon import TelegramClient
 
 from app.config import settings
@@ -18,15 +20,34 @@ from mirco_services_data_management.kafka_io import send_message
 
 logger = logging.getLogger("main")
 
+# >>> NEW CODE <<<: Функция, которая декодирует session из SESSION_FILE_BASE64 и кладёт в файл
+def decode_session_file():
+    session_b64 = os.getenv("SESSION_FILE_BASE64", "")
+    session_path = settings.SESSION_FILE  # "userbot.session" по умолчанию
+    if session_b64.strip():
+        try:
+            data = base64.b64decode(session_b64)
+            with open(session_path, "wb") as f:
+                f.write(data)
+            logger.info(f"Decoded Telegram session into '{session_path}'")
+        except Exception as e:
+            logger.exception(f"Failed to decode SESSION_FILE_BASE64: {e}")
+    else:
+        logger.warning("SESSION_FILE_BASE64 is empty; no preloaded session will be used.")
+
 async def run_tg_ubot():
     setup_logging()
     ensure_dir("/app/data")
     ensure_dir("/app/logs")
 
+    decode_session_file()
+
     client = TelegramClient(settings.SESSION_FILE, settings.TELEGRAM_API_ID, settings.TELEGRAM_API_HASH)
     await client.start()
+
+    # Если файл сессии устарел или невалидный — авторизации не будет
     if not await client.is_user_authorized():
-        logger.error("Telegram client not authorized. Exiting.")
+        logger.error("Telegram client not authorized (session invalid or expired). Exiting.")
         return
 
     # Собираем информацию о доступных чатах/каналах
@@ -65,7 +86,6 @@ async def run_tg_ubot():
         message_callback=message_callback
     )
 
-    # Понадобится буфер (очередь) и событие активности
     message_buffer = asyncio.Queue()
     userbot_active = asyncio.Event()
     userbot_active.set()  # включаем обработку новых сообщений
