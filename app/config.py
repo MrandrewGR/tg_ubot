@@ -1,25 +1,15 @@
-# tg_ubot/app/config.py
+# app/config.py
 
 import os
 from typing import Optional, List
 from pydantic import BaseSettings, Field
-
-# Если вы действительно хотите наследоваться от BaseConfig:
 from mirco_services_data_management.config import BaseConfig
 
-
 class TGUBotSettings(BaseSettings, BaseConfig):
-    """
-    Переименовали поле LOG_LEVEL -> LOG_LEVEL_, с alias="LOG_LEVEL".
-    Так Pydantic не ругается, а переменная окружения LOG_LEVEL по-прежнему будет работать.
-    """
-
     TELEGRAM_API_ID: int
     TELEGRAM_API_HASH: str
 
-    # Kafka: топик для сообщений
     UBOT_PRODUCE_TOPIC: str = os.getenv("KAFKA_UBOT_OUTPUT_TOPIC", "tg_ubot_output")
-
     KAFKA_GAP_SCAN_TOPIC: str = os.getenv("KAFKA_GAP_SCAN_TOPIC", "gap_scan_request")
     KAFKA_GAP_SCAN_RESPONSE_TOPIC: str = os.getenv("KAFKA_GAP_SCAN_RESPONSE_TOPIC", "gap_scan_response")
 
@@ -45,9 +35,9 @@ class TGUBotSettings(BaseSettings, BaseConfig):
 
     SESSION_FILE: str = os.getenv("SESSION_FILE", "userbot.session")
 
-    # <-- Вот главное отличие:
-    # ВМЕСТО "LOG_LEVEL: str = os.getenv(...)" ДЕЛАЕМ:
-    LOG_LEVEL_: str = Field("INFO", alias="LOG_LEVEL")
+    # <-- Переименовали, чтобы не конфликтовать с BaseConfig.LOG_LEVEL_
+    #     В переменных окружения это будет всё так же LOG_LEVEL
+    UBOT_LOG_LEVEL: str = Field("INFO", alias="LOG_LEVEL")
 
     class Config:
         env_file = "/app/env/tg_ubot.env"

@@ -1,12 +1,12 @@
-# tg_ubot/app/logger.py
+# app/logger.py
 
 import logging
 from .config import settings
 
 def setup_logging():
-    # Раньше было: level = getattr(logging, settings.LOG_LEVEL.upper(), logging.INFO)
-    # Теперь:
-    level = getattr(logging, settings.LOG_LEVEL_.upper(), logging.INFO)
+    # Берём поле UBOT_LOG_LEVEL, которое мы только что переименовали
+    level_name = settings.UBOT_LOG_LEVEL.upper()
+    level = getattr(logging, level_name, logging.INFO)
 
     logging.basicConfig(
         level=level,
@@ -14,5 +14,5 @@ def setup_logging():
         handlers=[logging.StreamHandler()]
     )
     logger = logging.getLogger("tg_ubot")
-    logger.info("Logging configured for tg_ubot.")
+    logger.info(f"Logging configured for tg_ubot at level={level_name}")
     return logger
