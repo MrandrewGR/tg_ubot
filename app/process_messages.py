@@ -6,15 +6,15 @@
 
 import logging
 from datetime import datetime
-from telethon.tl.types import Message, MessageEntityUrl, MessageEntityTextUrl
+from telethon.tl.types import Message, MessageEntityUrl, MessageEntityTextUrl, MessageReactions
 from zoneinfo import ZoneInfo
 
 logger = logging.getLogger("process_messages")
 
-
 def build_markdown_and_links(raw_text: str, entities: list):
     """
-    Преобразуем текст + Telethon entities => (Markdown, links[]).
+    Example code to transform Telethon entities into a MarkDown-like text and gather links.
+    (No changes needed if you already have it. Kept here for completeness.)
     """
     if not entities:
         return raw_text, []
@@ -27,7 +27,6 @@ def build_markdown_and_links(raw_text: str, entities: list):
     for entity in entities_sorted:
         if entity.offset > last_offset:
             md_fragments.append(raw_text[last_offset:entity.offset])
-
         e_length = entity.length
         display_text = raw_text[entity.offset : entity.offset + e_length]
 
@@ -42,6 +41,7 @@ def build_markdown_and_links(raw_text: str, entities: list):
             })
             last_offset = entity.offset + e_length
         else:
+            # No special formatting, just add the text
             md_fragments.append(display_text)
             last_offset = entity.offset + e_length
 
@@ -52,12 +52,31 @@ def build_markdown_and_links(raw_text: str, entities: list):
     return text_markdown, links
 
 
+def parse_reactions(msg: Message) -> dict:
+    """
+    Extract total reaction count and a breakdown by each reaction type/emoticon.
+    """
+    if not msg.reactions:
+        return {"total_reactions": 0, "reaction_types": {}}
+
+    total = 0
+    reaction_types = {}
+    for rcount in msg.reactions.results:
+        # rcount.reaction is often a ReactionEmoji with `.emoticon`
+        emoticon = getattr(rcount.reaction, 'emoticon', 'unknown')
+        cnt = rcount.count
+        total += cnt
+        reaction_types[emoticon] = reaction_types.get(emoticon, 0) + cnt
+
+    return {
+        "total_reactions": total,
+        "reaction_types": reaction_types
+    }
+
+
 def serialize_message(msg: Message, event_type: str, chat_info: dict) -> dict:
     """
-    Сериализует Telethon Message -> dict:
-      - date (МСК)
-      - text_markdown, links
-      - поля sender, chat_id, name_uname, month_part и т.д.
+    Serializes Telethon Message -> dict with date in Moscow time, includes reaction data.
     """
     try:
         moscow_tz = ZoneInfo("Europe/Moscow")
@@ -74,11 +93,14 @@ def serialize_message(msg: Message, event_type: str, chat_info: dict) -> dict:
 
         raw_text = msg.raw_text or ""
         text_markdown, links = build_markdown_and_links(raw_text, msg.entities or [])
-        month_part = date_moscow.strftime("%Y-%m")
 
-        return {
+        # Reaction data
+        reaction_data = parse_reactions(msg)
+
+        data = {
             "event_type": event_type,
             "message_id": msg.id,
+            # Convert the msg date to a string in ISO format, in Moscow tz
             "date": date_moscow.isoformat(),
             "text_plain": raw_text,
             "text_markdown": text_markdown,
@@ -88,8 +110,10 @@ def serialize_message(msg: Message, event_type: str, chat_info: dict) -> dict:
             "chat_title": chat_info.get("chat_title", ""),
             "target_id": chat_info.get("target_id", ""),
             "name_uname": chat_info.get("name_uname", "Unknown"),
-            "month_part": month_part
+            "month_part": date_moscow.strftime("%Y-%m"),
+            "reactions": reaction_data,  # total_reactions + per-emoticon counts
         }
+        return data
     except Exception as e:
         logger.exception(f"[serialize_message] Error: {e}")
         return {}
