@@ -1,5 +1,3 @@
-# app/config.py
-
 import os
 from typing import Optional, List
 from pydantic import BaseSettings, Field
@@ -35,13 +33,17 @@ class TGUBotSettings(BaseSettings, BaseConfig):
 
     SESSION_FILE: str = os.getenv("SESSION_FILE", "userbot.session")
 
-    # <-- Переименовали, чтобы не конфликтовать с BaseConfig.LOG_LEVEL_
-    #     В переменных окружения это будет всё так же LOG_LEVEL
+    # Поле с лог-уровнем; в переменной окружения ожидается LOG_LEVEL,
+    # но внутри класса сохраняется как UBOT_LOG_LEVEL
     UBOT_LOG_LEVEL: str = Field("INFO", alias="LOG_LEVEL")
 
     class Config:
         env_file = "/app/env/tg_ubot.env"
         env_file_encoding = "utf-8"
 
+    @property
+    def LOG_LEVEL(self) -> str:
+        # Позволяет обращаться к лог-уровню через settings.LOG_LEVEL
+        return self.UBOT_LOG_LEVEL
 
 settings = TGUBotSettings()
