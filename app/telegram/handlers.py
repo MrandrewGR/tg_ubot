@@ -1,4 +1,4 @@
-# tg_ubot/app/telegram/handlers.py
+# app/telegram/handlers.py
 
 import logging
 import asyncio
@@ -8,9 +8,11 @@ from telethon.tl.types import Message
 from app.config import settings
 from app.utils import human_like_delay, get_delay_settings
 from app.process_messages import serialize_message
-from mirco_services_data_management.db import ensure_partitioned_parent_table, insert_partitioned_record
+# Replaced import: we now do upsert
+from mirco_services_data_management.db import ensure_partitioned_parent_table, upsert_partitioned_record
 
 logger = logging.getLogger("unified_handler")
+
 
 def register_unified_handler(
     client,
@@ -20,7 +22,7 @@ def register_unified_handler(
     state_mgr=None
 ):
     """
-    Регистрируем обработчики NewMessage и MessageEdited для списка чатов (target_ids).
+    Registers handlers for new messages and edited messages, limited to chat IDs in `target_ids`.
     """
     target_ids = list(chat_id_to_data.keys())
     logger.info(f"Registering unified_handler for chats: {target_ids}")
@@ -43,6 +45,13 @@ def register_unified_handler(
 
 
 async def process_message_event(event, event_type, message_buffer, chat_id_to_data):
+    """
+    Handle a single new/edited message event:
+    1) Possibly insert a 'human-like' delay,
+    2) Serialize the message (with reaction data),
+    3) Put it on the queue (for Kafka or whatever),
+    4) Upsert into the DB so only the latest state remains.
+    """
     try:
         msg: Message = event.message
         chat_info = chat_id_to_data.get(msg.chat_id)
@@ -50,35 +59,35 @@ async def process_message_event(event, event_type, message_buffer, chat_id_to_da
             logger.warning(f"No chat_info for chat_id={msg.chat_id}, skipping.")
             return
 
-        # Имитируем задержку
+        # Imitate a random delay
         dmin, dmax = get_delay_settings("chat")
         await human_like_delay(dmin, dmax)
 
-        # Сериализуем
+        # Serialize
         data = serialize_message(msg, event_type, chat_info)
         if not data:
             return
 
-        # Для демонстрации: складываем в очередь (как будто Kafka producer)
+        # Optionally put to a queue => which your code later sends to Kafka
         topic = settings.UBOT_PRODUCE_TOPIC
         await message_buffer.put((topic, data))
 
-        # Сохраняем в таблицу (через mirco_services_data_management.db)
-        # Имена таблиц формируются автоматически: "messages_..."
+        # Build a partitioned table name, e.g. "messages_<chat_username>" or "messages_<chat_id>"
         if chat_info.get("chat_username"):
             table_suffix = chat_info["chat_username"].lstrip("@").lower()
         else:
             table_suffix = str(msg.chat_id)
         table_name = "messages_" + table_suffix
 
+        # Ensure the partitioned table is created
         ensure_partitioned_parent_table(table_name)
-        deduplicate = (event_type == "new_message")  # только новые не дублируем
-        inserted = insert_partitioned_record(table_name, data, deduplicate=deduplicate)
 
+        # Upsert into DB
+        inserted = upsert_partitioned_record(table_name, data)
         if inserted:
-            logger.info(f"[unified_handler] Inserted msg_id={msg.id} into {table_name}")
+            logger.info(f"[unified_handler] Inserted new row for msg_id={msg.id} in {table_name}.")
         else:
-            logger.info(f"[unified_handler] Duplicate => not inserted, msg_id={msg.id} in {table_name}")
+            logger.info(f"[unified_handler] Updated existing row for msg_id={msg.id} in {table_name}.")
 
         logger.info(f"[unified_handler] Processed {event_type} msg_id={msg.id} chat_id={msg.chat_id}")
 
