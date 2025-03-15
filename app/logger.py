@@ -4,10 +4,10 @@ import logging
 from .config import settings
 
 def setup_logging():
-    """
-    Настраиваем логирование в stdout с уровнем LOG_LEVEL из настроек.
-    """
-    level = getattr(logging, settings.LOG_LEVEL.upper(), logging.INFO)
+    # Раньше было: level = getattr(logging, settings.LOG_LEVEL.upper(), logging.INFO)
+    # Теперь:
+    level = getattr(logging, settings.LOG_LEVEL_.upper(), logging.INFO)
+
     logging.basicConfig(
         level=level,
         format='%(asctime)s %(levelname)s [%(name)s]: %(message)s',
