@@ -1,18 +1,18 @@
-# tg_ubot/app/telegram/backfill.py
-
 import asyncio
 import logging
+from datetime import timedelta
 from telethon import errors
 
-from app.utils import human_like_delay, get_delay_settings
+from app.utils import human_like_delay, get_delay_settings, get_current_time_moscow
 from app.process_messages import serialize_message
+from app.config import settings
 
 logger = logging.getLogger("backfill_manager")
 
 class BackfillManager:
     """
-    Менеджер бэкфилла. Проходит "назад" по старым сообщением чата,
-    записывает их в Kafka/DB, пока не достигнет конца (ID=1).
+    Менеджер бэкфилла. Проходит "назад" по старым сообщениям чата,
+    записывает их в Kafka/DB, пока не достигнет конца (ID=1) или сообщения старше указанного порога.
     """
 
     def __init__(
@@ -47,7 +47,6 @@ class BackfillManager:
         logger.info("BackfillManager started.")
         while not self._stop_event.is_set():
             await asyncio.sleep(self.idle_timeout)
-            # Если приходили новые сообщения, бэкфилл отложим
             new_count = self.state_mgr.pop_new_messages_count(self.idle_timeout)
             if new_count > self.new_msgs_threshold:
                 logger.debug("[Backfill] new messages => skip this round")
@@ -58,7 +57,6 @@ class BackfillManager:
                 logger.debug("[Backfill] No chats needing backfill.")
                 continue
 
-            # упрощённая логика: бэкфиллим чаты в порядке убывания offset
             chats_to_backfill.sort(
                 key=lambda cid: self.state_mgr.get_backfill_from_id(cid) or 1,
                 reverse=True
@@ -67,9 +65,7 @@ class BackfillManager:
             for cid in chats_to_backfill:
                 if self._stop_event.is_set():
                     break
-                # Сначала восполним "дыры"
                 await self._fill_missing_ranges(cid)
-                # Затем бэкфилл из backfill_from_id
                 await self._do_chat_backfill(cid)
 
         logger.info("BackfillManager stopped.")
@@ -90,6 +86,7 @@ class BackfillManager:
             try:
                 logger.info(f"[Backfill] Filling gaps {start_id}..{end_id} for chat {chat_id}")
                 current_off = offset
+                stop_processing = False
                 while current_off > start_id:
                     msgs = await self.client.get_messages(
                         entity=chat_id,
@@ -103,6 +100,15 @@ class BackfillManager:
                     for m in msgs:
                         if m.id >= current_off:
                             continue
+
+                        if settings.BACKFILL_MAX_DAYS > 0:
+                            cutoff_date = get_current_time_moscow() - timedelta(days=settings.BACKFILL_MAX_DAYS)
+                            message_date = m.date.astimezone(cutoff_date.tzinfo)
+                            if message_date < cutoff_date:
+                                logger.info(f"[Backfill] Message {m.id} date {message_date} is older than cutoff {cutoff_date}. Stop filling gaps for chat {chat_id}.")
+                                stop_processing = True
+                                break
+
                         dmin, dmax = get_delay_settings("chat")
                         await human_like_delay(dmin, dmax)
 
@@ -110,7 +116,7 @@ class BackfillManager:
                         await self.message_callback(data)
                         if m.id < min_id:
                             min_id = m.id
-                    if min_id >= current_off:
+                    if stop_processing or min_id >= current_off:
                         break
                     current_off = min_id
                     if current_off <= start_id:
@@ -155,6 +161,15 @@ class BackfillManager:
             for m in msgs:
                 if m.id >= offset:
                     continue
+
+                if settings.BACKFILL_MAX_DAYS > 0:
+                    cutoff_date = get_current_time_moscow() - timedelta(days=settings.BACKFILL_MAX_DAYS)
+                    message_date = m.date.astimezone(cutoff_date.tzinfo)
+                    if message_date < cutoff_date:
+                        logger.info(f"[Backfill] Message {m.id} date {message_date} is older than cutoff {cutoff_date}. Stop backfill for chat {chat_id}.")
+                        self.state_mgr.update_backfill_from_id(chat_id, 1)
+                        return
+
                 dmin, dmax = get_delay_settings("chat")
                 await human_like_delay(dmin, dmax)
 

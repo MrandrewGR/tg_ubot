@@ -3,6 +3,7 @@ from typing import Optional, List
 from pydantic import BaseSettings, Field
 from mirco_services_data_management.config import BaseConfig
 
+
 class TGUBotSettings(BaseSettings, BaseConfig):
     TELEGRAM_API_ID: int
     TELEGRAM_API_HASH: str
@@ -37,13 +38,16 @@ class TGUBotSettings(BaseSettings, BaseConfig):
     # но внутри класса сохраняется как UBOT_LOG_LEVEL
     UBOT_LOG_LEVEL: str = Field("INFO", alias="LOG_LEVEL")
 
+    # Новое поле: ограничение глубины backfill по дням (0 = без ограничения)
+    BACKFILL_MAX_DAYS: int = 0
+
     class Config:
         env_file = "/app/env/tg_ubot.env"
         env_file_encoding = "utf-8"
 
     @property
     def LOG_LEVEL(self) -> str:
-        # Позволяет обращаться к лог-уровню через settings.LOG_LEVEL
         return self.UBOT_LOG_LEVEL
+
 
 settings = TGUBotSettings()
