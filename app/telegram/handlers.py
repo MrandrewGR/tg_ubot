@@ -1,5 +1,3 @@
-# app/telegram/handlers.py
-
 import logging
 import asyncio
 from telethon import events
@@ -8,7 +6,7 @@ from telethon.tl.types import Message
 from app.config import settings
 from app.utils import human_like_delay, get_delay_settings
 from app.process_messages import serialize_message
-# Replaced import: we now do upsert
+# Replaced import: мы теперь используем upsert
 from mirco_services_data_management.db import ensure_partitioned_parent_table, upsert_partitioned_record
 
 logger = logging.getLogger("unified_handler")
@@ -22,7 +20,8 @@ def register_unified_handler(
     state_mgr=None
 ):
     """
-    Registers handlers for new messages and edited messages, limited to chat IDs in `target_ids`.
+    Регистрирует обработчики для новых и отредактированных сообщений,
+    ограниченные чатами из `target_ids`.
     """
     target_ids = list(chat_id_to_data.keys())
     logger.info(f"Registering unified_handler for chats: {target_ids}")
@@ -46,11 +45,11 @@ def register_unified_handler(
 
 async def process_message_event(event, event_type, message_buffer, chat_id_to_data):
     """
-    Handle a single new/edited message event:
-    1) Possibly insert a 'human-like' delay,
-    2) Serialize the message (with reaction data),
-    3) Put it on the queue (for Kafka or whatever),
-    4) Upsert into the DB so only the latest state remains.
+    Обрабатывает событие нового/отредактированного сообщения:
+      1) Вставляет задержку для имитации "человеческого" поведения,
+      2) Сериализует сообщение (включая данные о реакциях),
+      3) Помещает данные в очередь (для последующей отправки в Kafka),
+      4) Выполняет upsert в базу данных.
     """
     try:
         msg: Message = event.message
@@ -59,30 +58,30 @@ async def process_message_event(event, event_type, message_buffer, chat_id_to_da
             logger.warning(f"No chat_info for chat_id={msg.chat_id}, skipping.")
             return
 
-        # Imitate a random delay
+        # Имитация случайной задержки
         dmin, dmax = get_delay_settings("chat")
         await human_like_delay(dmin, dmax)
 
-        # Serialize
+        # Сериализация
         data = serialize_message(msg, event_type, chat_info)
         if not data:
             return
 
-        # Optionally put to a queue => which your code later sends to Kafka
+        # Помещаем данные в очередь для Kafka
         topic = settings.UBOT_PRODUCE_TOPIC
         await message_buffer.put((topic, data))
 
-        # Build a partitioned table name, e.g. "messages_<chat_username>" or "messages_<chat_id>"
+        # Формирование имени таблицы (например, "messages_<chat_username>" или "messages_<chat_id>")
         if chat_info.get("chat_username"):
             table_suffix = chat_info["chat_username"].lstrip("@").lower()
         else:
             table_suffix = str(msg.chat_id)
         table_name = "messages_" + table_suffix
 
-        # Ensure the partitioned table is created
+        # Убедимся, что родительская partition-таблица создана
         ensure_partitioned_parent_table(table_name)
 
-        # Upsert into DB
+        # Upsert в БД
         inserted = upsert_partitioned_record(table_name, data)
         if inserted:
             logger.info(f"[unified_handler] Inserted new row for msg_id={msg.id} in {table_name}.")
@@ -93,3 +92,50 @@ async def process_message_event(event, event_type, message_buffer, chat_id_to_da
 
     except Exception as e:
         logger.exception(f"[unified_handler] Error: {e}")
+
+
+# Новый обработчик для команды "push" от администратора.
+# При получении текстового сообщения "push" от пользователя с username, равным settings.ADMIN_USERNAME,
+# инициируется публикация в канал, независимо от времени.
+@events.register(events.NewMessage)
+async def on_admin_push(event):
+    try:
+        # Проверяем, что текст сообщения равен "push" (без учета регистра)
+        text = event.message.raw_text.strip().lower()
+        if text != "push":
+            return
+
+        # Получаем отправителя сообщения
+        sender = await event.get_sender()
+        if not sender or not hasattr(sender, "username") or not sender.username:
+            return
+
+        sender_username = "@" + sender.username.lower()
+
+        # Проверяем, что отправитель является администратором
+        if sender_username != settings.ADMIN_USERNAME.lower():
+            return
+
+        logger.info(f"Received admin push command from {sender_username}.")
+
+        # Здесь можно реализовать логику публикации. Пример с тестовыми данными:
+        top_msg = {
+            "message_id": 9999,
+            "clown_count": 12,
+            "chat_id": -10012345678,
+            "text": "This is the best 🤡 message",
+        }
+        publish_text = (
+            f"**Top clown-emoji message (24h)**\n\n"
+            f"Message ID: {top_msg['message_id']}\n"
+            f"Clown Count: {top_msg['clown_count']}\n"
+            f"Chat ID: {top_msg['chat_id']}\n"
+            f"Text: {top_msg['text'] or '(no text)'}"
+        )
+
+        await event.client.send_message(settings.PUBLISH_CHANNEL, publish_text)
+        logger.info("Publication triggered by admin push command.")
+        await event.reply("Publication triggered.")
+    except Exception as e:
+        logger.exception(f"Error in admin push handler: {e}")
+        await event.reply("Failed to trigger publication.")

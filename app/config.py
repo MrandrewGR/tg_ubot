@@ -44,6 +44,7 @@ class TGUBotSettings(BaseSettings, BaseConfig):
 
     # Новые поля для команды на постинг через Kafka
     PUBLISH_CHANNEL: str = Field(..., env="PUBLISH_CHANNEL")
+    ADMIN_USERNAME: str = Field(..., env="ADMIN_USERNAME")
     kafka_broker: str = Field(default="kafka:9092", alias="KAFKA_BROKER", env="KAFKA_BROKER")
 
     class Config:
