@@ -1,5 +1,3 @@
-# tg_ubot/app/kafka/consumers.py
-
 import json
 import asyncio
 import logging
@@ -25,6 +23,7 @@ class AIOKafkaMessageConsumer:
     async def initialize(self):
         """
         Создаём AIOKafkaConsumer, подписываемся на список топиков.
+        Используем настраиваемые параметры heartbeat и session timeout.
         """
         try:
             self.consumer = AIOKafkaConsumer(
@@ -33,6 +32,8 @@ class AIOKafkaMessageConsumer:
                 group_id=self.group_id,
                 auto_offset_reset='earliest',
                 enable_auto_commit=True,
+                heartbeat_interval_ms=settings.KAFKA_CONSUMER_HEARTBEAT_INTERVAL_MS,
+                session_timeout_ms=settings.KAFKA_CONSUMER_SESSION_TIMEOUT_MS,
                 value_deserializer=lambda m: m.decode('utf-8')
             )
             await self.consumer.start()
