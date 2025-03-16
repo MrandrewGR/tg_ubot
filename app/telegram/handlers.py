@@ -99,6 +99,7 @@ async def process_message_event(event, event_type, message_buffer, chat_id_to_da
 # инициируется публикация в канал, независимо от времени.
 @events.register(events.NewMessage)
 async def on_admin_push(event):
+    logger.info("on_admin_push вызван!")
     try:
         text = event.message.raw_text.strip().lower()
         if text != "push":
