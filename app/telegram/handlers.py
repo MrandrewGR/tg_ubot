@@ -100,20 +100,20 @@ async def process_message_event(event, event_type, message_buffer, chat_id_to_da
 @events.register(events.NewMessage)
 async def on_admin_push(event):
     try:
-        # Проверяем, что текст сообщения равен "push" (без учета регистра)
         text = event.message.raw_text.strip().lower()
         if text != "push":
             return
 
-        # Получаем отправителя сообщения
         sender = await event.get_sender()
-        if not sender or not hasattr(sender, "username") or not sender.username:
+        if not sender or not getattr(sender, "username", None):
             return
 
         sender_username = "@" + sender.username.lower()
+        logger.info(f"ADMIN_USERNAME from config: {settings.ADMIN_USERNAME}")
+        logger.info(f"Sender username: {sender_username}")
 
-        # Проверяем, что отправитель является администратором
         if sender_username != settings.ADMIN_USERNAME.lower():
+            logger.info("Sender is not admin, ignoring push command.")
             return
 
         logger.info(f"Received admin push command from {sender_username}.")
