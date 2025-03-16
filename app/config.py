@@ -39,11 +39,14 @@ class TGUBotSettings(BaseSettings, BaseConfig):
     UBOT_LOG_LEVEL: str = Field("INFO", alias="LOG_LEVEL")
 
     # Новое поле: ограничение глубины backfill по дням (0 = без ограничения)
-    BACKFILL_MAX_DAYS: int = 2
+    BACKFILL_MAX_DAYS: int = 0
 
     # Новые параметры для Kafka consumer (настраиваются через переменные окружения)
     KAFKA_CONSUMER_HEARTBEAT_INTERVAL_MS: int = 3000
     KAFKA_CONSUMER_SESSION_TIMEOUT_MS: int = 10000
+
+    # Новое поле: опциональное подключение Kafka consumer
+    ENABLE_KAFKA_CONSUMER: bool = False
 
     class Config:
         env_file = "/app/env/tg_ubot.env"

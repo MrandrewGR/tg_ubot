@@ -1,5 +1,3 @@
-# tg_ubot/app/worker.py
-
 import asyncio
 import logging
 
@@ -11,13 +9,14 @@ from app.telegram.gaps import LocalGapsManager
 
 logger = logging.getLogger("worker")
 
+
 class TGUBotWorker(BaseWorker):
     """
     Основной класс-воркер для userbot-а:
-     - наследует BaseWorker, чтобы использовать общий Kafka consumer/producer (если нужно).
-     - запускает фоновые задачи:
-       * backfill (BackfillManager)
-       * локальный поиск "дыр" в сообщениях (LocalGapsManager)
+      - Наследует BaseWorker для использования общей логики (например, Kafka producer),
+        который всегда запускается.
+      - Обработка входящих сообщений (Kafka consumer) становится опциональной.
+      - Также запускаются фоновые задачи: backfill и поиск "дыр" (gap finder).
     """
 
     def __init__(self, config, client, chat_id_to_data, state_mgr, message_callback):
@@ -27,6 +26,7 @@ class TGUBotWorker(BaseWorker):
         self.state_mgr = state_mgr
         self.message_callback = message_callback
         self.stop_event = asyncio.Event()
+        self.enable_kafka_consumer = config.ENABLE_KAFKA_CONSUMER
 
         # Бэкфилл
         self.backfill_manager = BackfillManager(
@@ -43,8 +43,10 @@ class TGUBotWorker(BaseWorker):
         )
 
     async def start(self):
-        # Запускаем BaseWorker (Kafka consumer/producer)
+        # Всегда запускаем BaseWorker для инициализации продюсера и фоновых задач.
         await super().start()
+        if not self.enable_kafka_consumer:
+            logger.info("Kafka consumer disabled by configuration. Incoming messages will be ignored.")
 
     async def _after_baseworker_started(self):
         # После старта Kafka-процессов запускаем задачи бэкфилла и локального gap-сканирования
@@ -79,9 +81,18 @@ class TGUBotWorker(BaseWorker):
 
     async def handle_message(self, message: dict):
         """
-        Если BaseWorker подписан на какой-то input-topic, можно обрабатывать входящие сообщения здесь.
+        Если BaseWorker получает сообщение из Kafka, то:
+          - Если ENABLE_KAFKA_CONSUMER True – обрабатываем сообщение.
+          - Если False – просто игнорируем.
         """
+        if not self.enable_kafka_consumer:
+            logger.debug(f"[TGUBotWorker.handle_message] Kafka consumer disabled; ignoring message: {message}")
+            return
+
         logger.debug(f"[TGUBotWorker.handle_message] got message: {message}")
+        # Реализуйте здесь необходимую логику обработки входящих сообщений,
+        # если хотите использовать режим потребителя.
+        # Пока оставляем pass.
         pass
 
     def stop(self):
