@@ -35,7 +35,7 @@ class TGUBotSettings(BaseSettings, BaseConfig):
 
     UBOT_LOG_LEVEL: str = Field("INFO", alias="LOG_LEVEL")
 
-    BACKFILL_MAX_DAYS: int = 2
+    BACKFILL_MAX_DAYS: int = 0
 
     KAFKA_CONSUMER_HEARTBEAT_INTERVAL_MS: int = 3000
     KAFKA_CONSUMER_SESSION_TIMEOUT_MS: int = 10000
@@ -44,7 +44,7 @@ class TGUBotSettings(BaseSettings, BaseConfig):
 
     # Новые поля для команды на постинг через Kafka
     PUBLISH_CHANNEL: str = Field(..., env="PUBLISH_CHANNEL")
-    KAFKA_BROKER: str = Field(default="kafka:9092", env="KAFKA_BROKER")
+    kafka_broker: str = Field(default="kafka:9092", alias="KAFKA_BROKER", env="KAFKA_BROKER")
 
     class Config:
         env_file = "/app/env/tg_ubot.env"

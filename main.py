@@ -35,7 +35,7 @@ def decode_session_file():
 async def run_post_message_consumer(client):
     consumer = AIOKafkaConsumer(
         "tg_post_message",
-        bootstrap_servers=settings.KAFKA_BROKER,
+        bootstrap_servers=settings.kafka_broker,
         group_id="tg_post_message_group",
         auto_offset_reset='earliest',
         value_deserializer=lambda m: json.loads(m.decode('utf-8'))
