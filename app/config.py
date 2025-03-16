@@ -3,7 +3,6 @@ from typing import Optional, List
 from pydantic import BaseSettings, Field
 from mirco_services_data_management.config import BaseConfig
 
-
 class TGUBotSettings(BaseSettings, BaseConfig):
     TELEGRAM_API_ID: int
     TELEGRAM_API_HASH: str
@@ -34,19 +33,18 @@ class TGUBotSettings(BaseSettings, BaseConfig):
 
     SESSION_FILE: str = os.getenv("SESSION_FILE", "userbot.session")
 
-    # Поле с лог-уровнем; в переменной окружения ожидается LOG_LEVEL,
-    # но внутри класса сохраняется как UBOT_LOG_LEVEL
     UBOT_LOG_LEVEL: str = Field("INFO", alias="LOG_LEVEL")
 
-    # Новое поле: ограничение глубины backfill по дням (0 = без ограничения)
-    BACKFILL_MAX_DAYS: int = 0
+    BACKFILL_MAX_DAYS: int = 2
 
-    # Новые параметры для Kafka consumer (настраиваются через переменные окружения)
     KAFKA_CONSUMER_HEARTBEAT_INTERVAL_MS: int = 3000
     KAFKA_CONSUMER_SESSION_TIMEOUT_MS: int = 10000
 
-    # Новое поле: опциональное подключение Kafka consumer
-    ENABLE_KAFKA_CONSUMER: bool = False
+    ENABLE_KAFKA_CONSUMER: bool = True
+
+    # Новые поля для команды на постинг через Kafka
+    PUBLISH_CHANNEL: str = Field(..., env="PUBLISH_CHANNEL")
+    KAFKA_BROKER: str = Field(default="kafka:9092", env="KAFKA_BROKER")
 
     class Config:
         env_file = "/app/env/tg_ubot.env"
@@ -55,6 +53,5 @@ class TGUBotSettings(BaseSettings, BaseConfig):
     @property
     def LOG_LEVEL(self) -> str:
         return self.UBOT_LOG_LEVEL
-
 
 settings = TGUBotSettings()

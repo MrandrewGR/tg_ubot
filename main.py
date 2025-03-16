@@ -1,11 +1,11 @@
-# tg_ubot/app/main.py
-
 import asyncio
 import signal
 import logging
 import os
 import base64
+import json
 from telethon import TelegramClient
+from aiokafka import AIOKafkaConsumer
 
 from app.config import settings
 from app.logger import setup_logging
@@ -14,16 +14,13 @@ from app.telegram.chat_info import get_all_chats_info
 from app.telegram.state_manager import StateManager
 from app.telegram.state import MessageCounter
 from app.worker import TGUBotWorker
-
-# mirco_services_data_management -> send_message, если нужно публиковать сообщения
 from mirco_services_data_management.kafka_io import send_message
 
 logger = logging.getLogger("main")
 
-# >>> NEW CODE <<<: Функция, которая декодирует session из SESSION_FILE_BASE64 и кладёт в файл
 def decode_session_file():
     session_b64 = os.getenv("SESSION_FILE_BASE64", "")
-    session_path = settings.SESSION_FILE  # "userbot.session" по умолчанию
+    session_path = settings.SESSION_FILE  # по умолчанию "userbot.session"
     if session_b64.strip():
         try:
             data = base64.b64decode(session_b64)
@@ -35,6 +32,33 @@ def decode_session_file():
     else:
         logger.warning("SESSION_FILE_BASE64 is empty; no preloaded session will be used.")
 
+async def run_post_message_consumer(client):
+    consumer = AIOKafkaConsumer(
+        "tg_post_message",
+        bootstrap_servers=settings.KAFKA_BROKER,
+        group_id="tg_post_message_group",
+        auto_offset_reset='earliest',
+        value_deserializer=lambda m: json.loads(m.decode('utf-8'))
+    )
+    await consumer.start()
+    logger.info("Started tg_post_message consumer.")
+    try:
+        async for msg in consumer:
+            data = msg.value
+            if data.get("command") == "post_message":
+                text = data.get("text", "")
+                channel = data.get("channel") or settings.PUBLISH_CHANNEL
+                if channel and text:
+                    try:
+                        await client.send_message(channel, text)
+                        logger.info(f"Posted message to channel {channel} via Kafka command.")
+                    except Exception as e:
+                        logger.exception(f"Failed to post message: {e}")
+    except Exception as e:
+        logger.exception(f"Error in post message consumer: {e}")
+    finally:
+        await consumer.stop()
+
 async def run_tg_ubot():
     setup_logging()
     ensure_dir("/app/data")
@@ -45,27 +69,17 @@ async def run_tg_ubot():
     client = TelegramClient(settings.SESSION_FILE, settings.TELEGRAM_API_ID, settings.TELEGRAM_API_HASH)
     await client.start()
 
-    # Если файл сессии устарел или невалидный — авторизации не будет
     if not await client.is_user_authorized():
         logger.error("Telegram client not authorized (session invalid or expired). Exiting.")
         return
 
-    # Собираем информацию о доступных чатах/каналах
     chat_id_to_data = await get_all_chats_info(client)
     logger.info(f"[main] Discovered {len(chat_id_to_data)} chats/channels after exclusions.")
 
-    # StateManager хранит информацию о бэкфиллах, пропущенных ID и т.п.
     state_mgr = StateManager("/app/data/state.json")
-
-    # MessageCounter — простой счётчик обработанных сообщений.
     msg_counter = MessageCounter(client, threshold=100)
 
     async def message_callback(data: dict):
-        """
-        Колбэк, вызывающийся при получении нового/бэкфил/редактированного сообщения:
-         1) отправить data в Kafka (topic = settings.UBOT_PRODUCE_TOPIC)
-         2) обновить счётчик
-        """
         topic = settings.UBOT_PRODUCE_TOPIC
         if worker.producer:
             await send_message(worker.producer, topic, data)
@@ -77,7 +91,6 @@ async def run_tg_ubot():
         else:
             logger.warning("[message_callback] Producer not ready yet!")
 
-    # Создаём основной worker
     worker = TGUBotWorker(
         config=settings,
         client=client,
@@ -88,9 +101,8 @@ async def run_tg_ubot():
 
     message_buffer = asyncio.Queue()
     userbot_active = asyncio.Event()
-    userbot_active.set()  # включаем обработку новых сообщений
+    userbot_active.set()
 
-    # Регистрируем обработчики Telethon (пришли новые сообщения, отредактированные и т.п.)
     from app.telegram.handlers import register_unified_handler
     register_unified_handler(
         client=client,
@@ -99,6 +111,9 @@ async def run_tg_ubot():
         chat_id_to_data=chat_id_to_data,
         state_mgr=state_mgr
     )
+
+    # Запускаем отдельную задачу для обработки команд на постинг из Kafka
+    post_message_task = asyncio.create_task(run_post_message_consumer(client), name="post_message_consumer")
 
     stop_event = asyncio.Event()
 
@@ -126,15 +141,14 @@ async def run_tg_ubot():
     logger.info("[main] Shutting down worker...")
     worker.stop()
     worker_task.cancel()
-    await asyncio.gather(worker_task, return_exceptions=True)
+    post_message_task.cancel()
+    await asyncio.gather(worker_task, post_message_task, return_exceptions=True)
 
     await client.disconnect()
     logger.info("tg_ubot service terminated.")
 
-
 def main():
     asyncio.run(run_tg_ubot())
-
 
 if __name__ == "__main__":
     main()
